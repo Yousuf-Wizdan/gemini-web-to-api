@@ -25,13 +25,14 @@ type RateLimitConfig struct {
 }
 
 type GeminiConfig struct {
-	Secure1PSID     string
-	Secure1PSIDTS   string
-	AuthUser        string
-	RefreshInterval int
-	MaxRetries      int
-	Cookies         string
-	Temporary       bool
+	Secure1PSID         string
+	Secure1PSIDTS       string
+	AuthUser            string
+	RefreshInterval     int
+	VideoTimeoutMinutes int
+	MaxRetries          int
+	Cookies             string
+	Temporary           bool
 	// CookieAPIKey enables the authenticated POST /admin/cookies endpoint used
 	// by browser extensions to push a fresh session. When empty the route is
 	// not registered at all.
@@ -60,8 +61,12 @@ const (
 	// Rotating cookies more often than this looks automated to Google and
 	// tends to get the session flagged or blocked.
 	minGeminiRefreshInterval = 10
-	defaultGeminiMaxRetries  = 3
-	defaultLogLevel          = "info"
+	// Only one video job runs at a time, so the timeout is also how long a
+	// stuck job keeps other video requests busy; the cap bounds that.
+	defaultGeminiVideoTimeoutMinutes = 10
+	maxGeminiVideoTimeoutMinutes     = 60
+	defaultGeminiMaxRetries          = 3
+	defaultLogLevel                  = "info"
 )
 
 func New() (*Config, error) {
@@ -92,6 +97,12 @@ func New() (*Config, error) {
 		cfg.Gemini.RefreshInterval = defaultGeminiRefreshInterval
 	} else if cfg.Gemini.RefreshInterval < minGeminiRefreshInterval {
 		cfg.Gemini.RefreshInterval = minGeminiRefreshInterval
+	}
+	cfg.Gemini.VideoTimeoutMinutes = getEnvInt("GEMINI_VIDEO_TIMEOUT_MINUTES", defaultGeminiVideoTimeoutMinutes)
+	if cfg.Gemini.VideoTimeoutMinutes <= 0 {
+		cfg.Gemini.VideoTimeoutMinutes = defaultGeminiVideoTimeoutMinutes
+	} else if cfg.Gemini.VideoTimeoutMinutes > maxGeminiVideoTimeoutMinutes {
+		cfg.Gemini.VideoTimeoutMinutes = maxGeminiVideoTimeoutMinutes
 	}
 	cfg.Gemini.MaxRetries = getEnvInt("GEMINI_MAX_RETRIES", defaultGeminiMaxRetries)
 	cfg.Gemini.Temporary = getEnvBool("GEMINI_TEMPORARY", false)

@@ -75,6 +75,9 @@ type Client struct {
 
 	videoJobsOnce sync.Once
 	videoJobs     *videoJobStore
+	// videoJobTimeout bounds one video job (GEMINI_VIDEO_TIMEOUT_MINUTES);
+	// zero means defaultVideoJobTimeout.
+	videoJobTimeout time.Duration
 }
 
 type CookieStore struct {
@@ -132,6 +135,7 @@ func newClient(cfg *configs.Config, log *zap.Logger, validate func(ctx context.C
 	return &Client{
 		httpClient:             client,
 		cookies:                cookies,
+		videoJobTimeout:        time.Duration(cfg.Gemini.VideoTimeoutMinutes) * time.Minute,
 		configuredCookieHeader: strings.TrimSpace(cfg.Gemini.Cookies),
 		authUser:               strings.TrimSpace(cfg.Gemini.AuthUser),
 		autoRefresh:            true,
