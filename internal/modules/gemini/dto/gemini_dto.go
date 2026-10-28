@@ -1,6 +1,9 @@
 package dto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // GeminiModelsResponse represents the response from /v1beta/models
 type GeminiModelsResponse struct {
@@ -30,7 +33,8 @@ func (r *GeminiGenerateRequest) UnmarshalJSON(data []byte) error {
 	type alias GeminiGenerateRequest
 	var raw struct {
 		alias
-		SystemInstructionCamel *Content `json:"systemInstruction"`
+		SystemInstructionCamel *Content    `json:"systemInstruction"`
+		ToolConfigCamel        *ToolConfig `json:"toolConfig"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -39,7 +43,60 @@ func (r *GeminiGenerateRequest) UnmarshalJSON(data []byte) error {
 	if r.SystemInstruction == nil && raw.SystemInstructionCamel != nil {
 		r.SystemInstruction = raw.SystemInstructionCamel
 	}
+	if r.ToolConfig == nil && raw.ToolConfigCamel != nil {
+		r.ToolConfig = raw.ToolConfigCamel
+	}
 	return nil
+}
+
+// FunctionCallingMode returns tool_config's mode upper-cased: "AUTO", "ANY",
+// "NONE", or "" when it is not set.
+func (r GeminiGenerateRequest) FunctionCallingMode() string {
+	if r.ToolConfig == nil || r.ToolConfig.FunctionCallingConfig == nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(r.ToolConfig.FunctionCallingConfig.Mode))
+}
+
+// HasToolsEnabled reports whether the model may call functions: some are
+// declared and tool_config mode is not NONE.
+func (r GeminiGenerateRequest) HasToolsEnabled() bool {
+	if r.FunctionCallingMode() == "NONE" {
+		return false
+	}
+	for _, tool := range r.Tools {
+		if len(tool.FunctionDeclarations) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// DeclaresFunction reports whether name is one of the declared functions.
+func (r GeminiGenerateRequest) DeclaresFunction(name string) bool {
+	for _, tool := range r.Tools {
+		for _, fn := range tool.FunctionDeclarations {
+			if fn.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// AllowsFunction reports whether tool_config's allowed_function_names permits
+// name; an empty list allows every declared function.
+func (r GeminiGenerateRequest) AllowsFunction(name string) bool {
+	if r.ToolConfig == nil || r.ToolConfig.FunctionCallingConfig == nil ||
+		len(r.ToolConfig.FunctionCallingConfig.AllowedFunctionNames) == 0 {
+		return true
+	}
+	for _, allowed := range r.ToolConfig.FunctionCallingConfig.AllowedFunctionNames {
+		if allowed == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Content represents a content block in Gemini API
@@ -48,14 +105,15 @@ type Content struct {
 	Parts []Part `json:"parts"`
 }
 
-// Part represents a part of content
+// Part represents a part of content. It is written in the REST (camelCase)
+// spellings official SDKs parse; UnmarshalJSON also accepts snake_case.
 type Part struct {
 	Text             string            `json:"text,omitempty"`
 	Thought          bool              `json:"thought,omitempty"`
-	InlineData       *InlineData       `json:"inline_data,omitempty"`
-	FileData         *FileData         `json:"file_data,omitempty"`
-	FunctionCall     *FunctionCall     `json:"function_call,omitempty"`
-	FunctionResponse *FunctionResponse `json:"function_response,omitempty"`
+	InlineData       *InlineData       `json:"inlineData,omitempty"`
+	FileData         *FileData         `json:"fileData,omitempty"`
+	FunctionCall     *FunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *FunctionResponse `json:"functionResponse,omitempty"`
 }
 
 func (p *Part) UnmarshalJSON(data []byte) error {
@@ -112,6 +170,22 @@ type Tool struct {
 	FunctionDeclarations []FunctionDeclaration `json:"function_declarations,omitempty"`
 }
 
+// UnmarshalJSON reads the declarations in either spelling, since REST clients send camelCase
+func (t *Tool) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Snake []FunctionDeclaration `json:"function_declarations"`
+		Camel []FunctionDeclaration `json:"functionDeclarations"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	t.FunctionDeclarations = raw.Snake
+	if len(t.FunctionDeclarations) == 0 {
+		t.FunctionDeclarations = raw.Camel
+	}
+	return nil
+}
+
 // FunctionDeclaration represents a function schema
 type FunctionDeclaration struct {
 	Name        string          `json:"name"`
@@ -119,15 +193,73 @@ type FunctionDeclaration struct {
 	Parameters  json.RawMessage `json:"parameters,omitempty" swagignore:"true"` // @SchemaType object
 }
 
+// UnmarshalJSON falls back to parametersJsonSchema when parameters is absent
+func (d *FunctionDeclaration) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name                string          `json:"name"`
+		Description         string          `json:"description"`
+		Parameters          json.RawMessage `json:"parameters"`
+		ParametersJSONCamel json.RawMessage `json:"parametersJsonSchema"`
+		ParametersJSONSnake json.RawMessage `json:"parameters_json_schema"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	d.Name = raw.Name
+	d.Description = raw.Description
+	d.Parameters = raw.Parameters
+	if len(d.Parameters) == 0 {
+		d.Parameters = raw.ParametersJSONCamel
+	}
+	if len(d.Parameters) == 0 {
+		d.Parameters = raw.ParametersJSONSnake
+	}
+	return nil
+}
+
 // ToolConfig represents configuration for tool use
 type ToolConfig struct {
 	FunctionCallingConfig *FunctionCallingConfig `json:"function_calling_config,omitempty"`
+}
+
+// UnmarshalJSON reads the calling config in either spelling
+func (c *ToolConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Snake *FunctionCallingConfig `json:"function_calling_config"`
+		Camel *FunctionCallingConfig `json:"functionCallingConfig"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.FunctionCallingConfig = raw.Snake
+	if c.FunctionCallingConfig == nil {
+		c.FunctionCallingConfig = raw.Camel
+	}
+	return nil
 }
 
 // FunctionCallingConfig represents configuration for function calling
 type FunctionCallingConfig struct {
 	Mode                 string   `json:"mode,omitempty"` // "AUTO", "ANY", "NONE"
 	AllowedFunctionNames []string `json:"allowed_function_names,omitempty"`
+}
+
+// UnmarshalJSON reads the allowed names in either spelling
+func (c *FunctionCallingConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Mode         string   `json:"mode"`
+		AllowedSnake []string `json:"allowed_function_names"`
+		AllowedCamel []string `json:"allowedFunctionNames"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.Mode = raw.Mode
+	c.AllowedFunctionNames = raw.AllowedSnake
+	if len(c.AllowedFunctionNames) == 0 {
+		c.AllowedFunctionNames = raw.AllowedCamel
+	}
+	return nil
 }
 
 // InlineData represents inline data (e.g., images)
