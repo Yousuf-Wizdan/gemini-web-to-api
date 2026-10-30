@@ -12,6 +12,7 @@ services:
     environment:
       PORT: "4981"
       APP_ENV: "production"
+      LOG_LEVEL: "info"
 
       GEMINI_COOKIES: "${GEMINI_COOKIES}"
       GEMINI_AUTH_USER: ""
@@ -30,19 +31,6 @@ services:
     tmpfs:
       - /tmp:rw,size=512m
       - /home/appuser/.cache:rw,size=256m
-
-    healthcheck:
-      test:
-        - CMD
-        - wget
-        - --quiet
-        - --tries=1
-        - --spider
-        - http://localhost:4981/health
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
 
 volumes:
   gemini_cookies:
