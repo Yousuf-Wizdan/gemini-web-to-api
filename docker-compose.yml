@@ -1,31 +1,48 @@
 services:
   app:
-    build: .
-    container_name: app
-    ports:
-      - "4981:4981"
-    env_file:
-      - .env
-    environment:
-      - PORT=4981
-      - APP_ENV=production
+    build:
+      context: .
+      dockerfile: Dockerfile
+
     restart: unless-stopped
+
+    expose:
+      - "4981"
+
+    environment:
+      PORT: "4981"
+      APP_ENV: "production"
+
+      GEMINI_COOKIES: "${GEMINI_COOKIES}"
+      GEMINI_AUTH_USER: ""
+
+      GEMINI_REFRESH_INTERVAL: "1440"
+      GEMINI_MAX_RETRIES: "3"
+      GEMINI_TEMPORARY: "false"
+
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_WINDOW_MS: "60000"
+      RATE_LIMIT_MAX_REQUESTS: "10"
+
     volumes:
-      - ./.cookies:/home/appuser/.cookies
+      - gemini_cookies:/home/appuser/.cookies
+
     tmpfs:
-      - /tmp
-      - /home/appuser/.cache
+      - /tmp:rw,size=512m
+      - /home/appuser/.cache:rw,size=256m
+
     healthcheck:
       test:
-        [
-          "CMD",
-          "wget",
-          "--quiet",
-          "--tries=1",
-          "--spider",
-          "http://localhost:4981/health",
-        ]
+        - CMD
+        - wget
+        - --quiet
+        - --tries=1
+        - --spider
+        - http://localhost:4981/health
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 20s
+
+volumes:
+  gemini_cookies:
